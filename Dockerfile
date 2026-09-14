@@ -25,7 +25,7 @@ ARG PLUMED_VERSION=2.9.0
 RUN wget -q https://github.com/plumed/plumed2/releases/download/v${PLUMED_VERSION}/plumed-src-${PLUMED_VERSION}.tgz \
  && tar xf plumed-src-${PLUMED_VERSION}.tgz && cd plumed-${PLUMED_VERSION} \
  && ./configure --prefix=/usr/local \
- && make -j"$(nproc)" && make install \
+ && make -j"$(nproc)" && make install && ldconfig \
  && cd .. && rm -rf plumed-${PLUMED_VERSION}*
 ENV PLUMED_KERNEL=/usr/local/lib/libplumedKernel.so
 
