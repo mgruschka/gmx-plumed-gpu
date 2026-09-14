@@ -1,0 +1,36 @@
+name: build-image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # adds a manual "Run workflow" button
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write        # lets the job push to your GHCR
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          large-packages: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/mgruschka/gmx-plumed-gpu:2023.2
