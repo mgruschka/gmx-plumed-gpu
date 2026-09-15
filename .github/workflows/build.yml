@@ -33,4 +33,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/mgruschka/gmx-plumed-gpu:2023.2
+          tags: ghcr.io/mgruschka/gmx-plumed-gpu:2023.5
+          build-args: |
+            JOBS=4
+            GMX_CUDA_TARGET_SM=70;75;80;86;89;90

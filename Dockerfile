@@ -15,24 +15,35 @@
 FROM nvidia/cuda:12.2.2-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+
+# Parallel build jobs. Default is conservative for a local WSL build with limited RAM;
+# pass --build-arg JOBS=$(nproc) on a beefier host.
+ARG JOBS=4
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake git wget bzip2 ca-certificates \
     libfftw3-dev libgsl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ---------- PLUMED ----------
-ARG PLUMED_VERSION=2.9.0
+ARG PLUMED_VERSION=2.9.4
 RUN wget -q https://github.com/plumed/plumed2/releases/download/v${PLUMED_VERSION}/plumed-src-${PLUMED_VERSION}.tgz \
  && tar xf plumed-src-${PLUMED_VERSION}.tgz && cd plumed-${PLUMED_VERSION} \
  && ./configure --prefix=/usr/local \
- && make -j"$(nproc)" && make install && ldconfig \
+ && make -j"${JOBS}" && make install && ldconfig \
  && cd .. && rm -rf plumed-${PLUMED_VERSION}*
 ENV PLUMED_KERNEL=/usr/local/lib/libplumedKernel.so
 
 # ---------- GROMACS (CUDA, thread-MPI), patched with PLUMED ----------
+# GROMACS and PLUMED versions must be a matched pair: PLUMED only ships patches
+# for specific GROMACS releases (see plumed2/patches/ for the chosen PLUMED tag).
+# PLUMED 2.9.x -> gromacs-2023.5 or gromacs-2024.3.
 # thread-MPI (GMX_MPI=OFF) -> no host-MPI dependency, single-node + multi-GPU.
 # For multi-walker metadynamics use PLUMED file-based WALKERS (no MPI needed).
-ARG GROMACS_VERSION=2023.2
+ARG GROMACS_VERSION=2023.5
+# Trimmed to a single arch (A100) for local troubleshooting. Restore the full list
+# for the cluster build: --build-arg GMX_CUDA_TARGET_SM="70;75;80;86;89;90"
+ARG GMX_CUDA_TARGET_SM=80
 RUN wget -q https://ftp.gromacs.org/gromacs/gromacs-${GROMACS_VERSION}.tar.gz \
  && tar xf gromacs-${GROMACS_VERSION}.tar.gz && cd gromacs-${GROMACS_VERSION} \
  && plumed patch -p -e gromacs-${GROMACS_VERSION} \
@@ -42,9 +53,9 @@ RUN wget -q https://ftp.gromacs.org/gromacs/gromacs-${GROMACS_VERSION}.tar.gz \
       -DGMX_MPI=OFF \
       -DGMX_SIMD=AVX2_256 \
       -DGMX_BUILD_OWN_FFTW=OFF \
-      -DGMX_CUDA_TARGET_SM="70;75;80;86;89;90" \
+      -DGMX_CUDA_TARGET_SM="${GMX_CUDA_TARGET_SM}" \
       -DCMAKE_INSTALL_PREFIX=/usr/local/gromacs \
- && make -j"$(nproc)" && make install \
+ && make -j"${JOBS}" && make install \
  && cd ../.. && rm -rf gromacs-${GROMACS_VERSION}*
 ENV PATH=/usr/local/gromacs/bin:$PATH
 
