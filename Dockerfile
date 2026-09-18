@@ -61,29 +61,39 @@ ENV PATH=/usr/local/gromacs/bin:$PATH
 
 # ---------- Python stack via micromamba ----------
 # Self-contained env at /opt/conda/envs/toid, conda-forge only (no pip/conda mixing),
-# with the single exception of the PLUMED python wrapper below.
-#   pytorch-cuda=12.1 : must be <= the CUDA toolkit in the base image (12.2) and the
-#                       host driver. Use 11.8 for older GPU-node drivers, or replace
-#                       with `cpuonly` if GPU torch is not needed.
-#   openbabel         : provides the obabel CLI.
+# with the exceptions listed at the pip step below.
+#   pytorch=*=cuda12*  : conda-forge's CUDA build. The legacy `-c pytorch pytorch-cuda`
+#                        recipe no longer works (PyTorch stopped publishing conda packages
+#                        after 2.5) and silently resolves to conda-forge's CPU-only build.
+#   cuda-version       : pins the CUDA runtime conda ships for torch/xgboost. Must be <=
+#                        the host driver's CUDA version (`nvidia-smi`). Newer values pull
+#                        newer torch; 12.2 matches the base image and is conservative.
+#   CONDA_OVERRIDE_CUDA: there is no GPU/driver at build time, so tell the solver which
+#                        __cuda virtual package to assume; otherwise CUDA builds are
+#                        "not installable".
+#   openbabel          : provides the obabel CLI.
+ARG TORCH_CUDA_VERSION=12.2
 ENV MAMBA_ROOT_PREFIX=/opt/conda
 ENV TOID_ENV=/opt/conda/envs/toid
 RUN wget -qO- https://micro.mamba.pm/api/micromamba/linux-64/latest \
-      | tar -xvj -C /usr/local bin/micromamba \
- && micromamba create -y -p ${TOID_ENV} -c conda-forge -c pytorch -c nvidia \
+      | tar -xj -C /usr/local bin/micromamba \
+ && CONDA_OVERRIDE_CUDA=${TORCH_CUDA_VERSION} \
+    micromamba create -y -p ${TOID_ENV} --override-channels -c conda-forge \
       python=3.11 \
       numpy scipy pandas matplotlib seaborn scikit-learn h5py \
-      mdtraj mdanalysis biopython peptidebuilder \
+      mdtraj mdanalysis biopython \
       rdkit xgboost networkx tqdm pillow \
-      pytorch pytorch-cuda=12.1 gpytorch \
+      "pytorch=*=cuda12*" "cuda-version=${TORCH_CUDA_VERSION}" gpytorch \
       openbabel \
       ipython jupyterlab ipykernel \
  && micromamba clean -a -y
 
-# PLUMED python wrapper: pip (not conda) so it binds to the source-built kernel above
-# via $PLUMED_KERNEL instead of pulling a second PLUMED kernel from conda-forge.
-# The PyPI package is a thin Cython shim; keep its version matched to PLUMED_VERSION.
-RUN ${TOID_ENV}/bin/pip install --no-cache-dir "plumed==${PLUMED_VERSION}"
+# pip-only packages:
+#   plumed         : the python wrapper is installed via pip (not conda) so it binds to the
+#                    source-built kernel above via $PLUMED_KERNEL instead of pulling a second
+#                    PLUMED kernel from conda-forge. Thin Cython shim; keep matched to PLUMED_VERSION.
+#   PeptideBuilder : not packaged on conda-forge; pure Python on top of Biopython (already in env).
+RUN ${TOID_ENV}/bin/pip install --no-cache-dir "plumed==${PLUMED_VERSION}" PeptideBuilder
 
 # ---------- Runtime environment ----------
 # Apptainer imports these into the container environment, so run_sim.sh / mini_sim.sh
