@@ -1,4 +1,4 @@
-# Portable GPU image: GROMACS + PLUMED + Python (OpenMM / MDTraj / MDAnalysis)
+# Portable GPU image: GROMACS + PLUMED + Python (PyTorch / MDTraj / MDAnalysis / RDKit / OpenBabel)
 #
 # Runs under Apptainer (--nv) on Midway and Docker (--gpus all) on AWS.
 # The image carries the CUDA *toolkit*; the NVIDIA *driver* is injected by the host,
@@ -59,18 +59,41 @@ RUN wget -q https://ftp.gromacs.org/gromacs/gromacs-${GROMACS_VERSION}.tar.gz \
  && cd ../.. && rm -rf gromacs-${GROMACS_VERSION}*
 ENV PATH=/usr/local/gromacs/bin:$PATH
 
-# ---------- Python / OpenMM via micromamba ----------
-# conda-forge is the reliable path for GPU OpenMM. The PLUMED python wrapper is
-# pip-installed so it binds to the source-built kernel above (PLUMED_KERNEL).
+# ---------- Python stack via micromamba ----------
+# Self-contained env at /opt/conda/envs/toid, conda-forge only (no pip/conda mixing),
+# with the single exception of the PLUMED python wrapper below.
+#   pytorch-cuda=12.1 : must be <= the CUDA toolkit in the base image (12.2) and the
+#                       host driver. Use 11.8 for older GPU-node drivers, or replace
+#                       with `cpuonly` if GPU torch is not needed.
+#   openbabel         : provides the obabel CLI.
 ENV MAMBA_ROOT_PREFIX=/opt/conda
+ENV TOID_ENV=/opt/conda/envs/toid
 RUN wget -qO- https://micro.mamba.pm/api/micromamba/linux-64/latest \
       | tar -xvj -C /usr/local bin/micromamba \
- && micromamba create -y -p /opt/conda -c conda-forge \
-      python=3.11 openmm mdtraj mdanalysis \
-      numpy scipy pandas matplotlib \
- && /opt/conda/bin/pip install --no-cache-dir plumed \
+ && micromamba create -y -p ${TOID_ENV} -c conda-forge -c pytorch -c nvidia \
+      python=3.11 \
+      numpy scipy pandas matplotlib seaborn scikit-learn h5py \
+      mdtraj mdanalysis biopython peptidebuilder \
+      rdkit xgboost networkx tqdm pillow \
+      pytorch pytorch-cuda=12.1 gpytorch \
+      openbabel \
+      ipython jupyterlab ipykernel \
  && micromamba clean -a -y
-ENV PATH=/opt/conda/bin:$PATH
+
+# PLUMED python wrapper: pip (not conda) so it binds to the source-built kernel above
+# via $PLUMED_KERNEL instead of pulling a second PLUMED kernel from conda-forge.
+# The PyPI package is a thin Cython shim; keep its version matched to PLUMED_VERSION.
+RUN ${TOID_ENV}/bin/pip install --no-cache-dir "plumed==${PLUMED_VERSION}"
+
+# ---------- Runtime environment ----------
+# Apptainer imports these into the container environment, so run_sim.sh / mini_sim.sh
+# and the sbatch templates work without `module load` / `source activate` lines.
+# thread-MPI build: no MPI runtime, the binary is `gmx` (not gmx_mpi), no mpirun.
+# GMXLIB is deliberately left unset: forcefields/ lives in the bind-mounted repo, so
+# pass it at run time, e.g. --env GMXLIB=/scratch/midway3/<user>/toid_explore/forcefields/
+ENV PATH=${TOID_ENV}/bin:/usr/local/gromacs/bin:/usr/local/bin:$PATH
+ENV LD_LIBRARY_PATH=/usr/local/gromacs/lib:/usr/local/lib:$LD_LIBRARY_PATH
+ENV OMP_NUM_THREADS=1
 
 # convenience for interactive shells (GMXLIB, completion, etc.)
 RUN echo "source /usr/local/gromacs/bin/GMXRC" >> /etc/bash.bashrc
